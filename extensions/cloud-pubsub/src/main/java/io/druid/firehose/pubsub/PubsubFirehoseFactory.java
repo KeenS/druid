@@ -99,16 +99,39 @@ public class PubsubFirehoseFactory implements FirehoseFactory<ByteBufferInputRow
       {
 
         private PullResponse pullResponse;
-        private List<String> ackIds;
+        volatile private List<String> ackIds = null;
         Iterator<ReceivedMessage> receivedMessages;
 
+        private void ack()
+        {
+          log.info("committing offsets");
+          // TODO: retry
+          if (ackIds != null) {
+            try {
+              AcknowledgeRequest ackRequest =
+                new AcknowledgeRequest().setAckIds(ackIds);
+              pubsub.projects().subscriptions()
+                .acknowledge(subscriptionName, ackRequest).execute();
+              ackIds = null;
+            } catch (IOException e) {
+              log.warn("An IO Exception occured while acking to Pub/Sub %s", e);
+            }
+          }
+        }
+
         private void loadData() throws IOException {
+          ack();
+
           log.info("loading data from Pub/Sub");
-          this.pullResponse = pubsub.projects().subscriptions()
+          pullResponse = pubsub.projects().subscriptions()
             .pull(subscriptionName, pullRequest).execute();
-          this.ackIds = new ArrayList<>(maxBatchSize);
-          this.receivedMessages =
-            pullResponse.getReceivedMessages().iterator();
+          ackIds = new ArrayList<>(maxBatchSize);
+          List<ReceivedMessage> msgs = pullResponse.getReceivedMessages();
+          if (msgs != null) {
+            receivedMessages = msgs.iterator();
+          } else {
+            receivedMessages = null;
+          }
         }
 
         private boolean isEmpty()
@@ -127,20 +150,27 @@ public class PubsubFirehoseFactory implements FirehoseFactory<ByteBufferInputRow
               log.warn("An IO Exception occured while fetching new data from Pub/Sub %s", e);
             }
           }
-          log.info("hasMore returning %s", ! isEmpty());
           return ! isEmpty();
         }
 
         @Override
         public InputRow nextRow()
         {
-          // FIXME: null checks
-          final PubsubMessage pubsubMessage = receivedMessages.next().getMessage();
-          log.info("message: %s", pubsubMessage);
-          final byte[] message = pubsubMessage.decodeData();//iter.next().message();
-          log.info("data: %s", message);
+          try{
+            // FIXME: null checks
+            ReceivedMessage receivedMessage = receivedMessages.next();
+            PubsubMessage pubsubMessage = receivedMessage.getMessage();
+            byte[] message = pubsubMessage.decodeData();
+            log.info("data: %s", new String(message));
+            InputRow row = theParser.parse(ByteBuffer.wrap(message));
+            ackIds.add(receivedMessage.getAckId());
 
-          return theParser.parse(ByteBuffer.wrap(message));
+            log.info("raw: %s", row);
+            return row;
+          } catch (Exception e) {
+            log.info("got a exception %s", e);
+            return null;
+          }
         }
 
         @Override
@@ -151,6 +181,7 @@ public class PubsubFirehoseFactory implements FirehoseFactory<ByteBufferInputRow
               @Override
               public void run()
               {
+                // the same as ack
                 log.info("committing offsets");
                 // TODO: retry
                 try {
