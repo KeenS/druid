@@ -1,1 +1,1 @@
-io.druid.firehose.pubsub.PubSubDruidModule
+io.druid.firehose.pubsub.PubsubDruidModule

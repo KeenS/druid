@@ -103,6 +103,7 @@ public class PubsubFirehoseFactory implements FirehoseFactory<ByteBufferInputRow
         Iterator<ReceivedMessage> receivedMessages;
 
         private void loadData() throws IOException {
+          log.info("loading data from Pub/Sub");
           this.pullResponse = pubsub.projects().subscriptions()
             .pull(subscriptionName, pullRequest).execute();
           this.ackIds = new ArrayList<>(maxBatchSize);
@@ -110,23 +111,24 @@ public class PubsubFirehoseFactory implements FirehoseFactory<ByteBufferInputRow
             pullResponse.getReceivedMessages().iterator();
         }
 
-        private boolean hasMoreInternal()
+        private boolean isEmpty()
         {
-          return receivedMessages == null || receivedMessages.hasNext();
+          return receivedMessages == null || ! receivedMessages.hasNext();
         }
 
 
         @Override
         public boolean hasMore()
         {
-          if (hasMoreInternal()) {
+          if (isEmpty()) {
             try {
               loadData();
             } catch (IOException e) {
               log.warn("An IO Exception occured while fetching new data from Pub/Sub %s", e);
             }
           }
-          return hasMoreInternal();
+          log.info("hasMore returning %s", ! isEmpty());
+          return ! isEmpty();
         }
 
         @Override
@@ -134,7 +136,9 @@ public class PubsubFirehoseFactory implements FirehoseFactory<ByteBufferInputRow
         {
           // FIXME: null checks
           final PubsubMessage pubsubMessage = receivedMessages.next().getMessage();
+          log.info("message: %s", pubsubMessage);
           final byte[] message = pubsubMessage.decodeData();//iter.next().message();
+          log.info("data: %s", message);
 
           return theParser.parse(ByteBuffer.wrap(message));
         }
