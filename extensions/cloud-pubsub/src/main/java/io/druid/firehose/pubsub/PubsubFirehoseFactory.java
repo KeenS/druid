@@ -106,7 +106,7 @@ public class PubsubFirehoseFactory implements FirehoseFactory<ByteBufferInputRow
         {
           log.info("committing offsets");
           // TODO: retry
-          if (ackIds != null) {
+          if (ackIds != null && ! ackIds.isEmpty()) {
             try {
               AcknowledgeRequest ackRequest =
                 new AcknowledgeRequest().setAckIds(ackIds);
@@ -147,7 +147,7 @@ public class PubsubFirehoseFactory implements FirehoseFactory<ByteBufferInputRow
             try {
               loadData();
             } catch (IOException e) {
-              log.warn("An IO Exception occured while fetching new data from Pub/Sub %s", e);
+              log.warn("An IO Exception occured while fetching new data from Pub/Sub: %s", e);
             }
           }
           return ! isEmpty();
@@ -161,14 +161,11 @@ public class PubsubFirehoseFactory implements FirehoseFactory<ByteBufferInputRow
             ReceivedMessage receivedMessage = receivedMessages.next();
             PubsubMessage pubsubMessage = receivedMessage.getMessage();
             byte[] message = pubsubMessage.decodeData();
-            log.info("data: %s", new String(message));
             InputRow row = theParser.parse(ByteBuffer.wrap(message));
             ackIds.add(receivedMessage.getAckId());
-
-            log.info("raw: %s", row);
             return row;
           } catch (Exception e) {
-            log.info("got a exception %s", e);
+            log.warn("got a exception when fetching new row: %s", e);
             return null;
           }
         }
@@ -190,7 +187,7 @@ public class PubsubFirehoseFactory implements FirehoseFactory<ByteBufferInputRow
                   pubsub.projects().subscriptions()
                     .acknowledge(subscriptionName, ackRequest).execute();
                 } catch (IOException e) {
-                  log.warn("An IO Exception occured while commiting to Pub/Sub %s", e);
+                  log.warn("An IO Exception occured while commiting to Pub/Sub %s: ", e);
                 }
               }
           };
